@@ -8,11 +8,11 @@ frame_rate = 60
 time_to_cross_screen = 1.5 #seconds
 screen_width = 400
 screen_height = 400
-bounce_coefficient = 0.1 #percentage of velocity retained after bouncing off of a wall
-friction_coefficient = 0.9 #percentage of velocity retained per frame due to friction
+bounce_coefficient = 0.3 #percentage of velocity retained after bouncing off of a wall
+friction_coefficient = 0.95 #percentage of velocity retained per frame due to friction
 minimum_velocity = 0.99 - 2*(screen_height/((frame_rate*time_to_cross_screen)**2)) #minimum velocity before stopping
 number_of_particles = 100
-particle_size = 3
+particle_size = 5
 
 class Sim:
     def __init__(self, width, height):
@@ -40,7 +40,7 @@ class Sim:
                 break
             if pygame.key.get_pressed()[pygame.K_SPACE]:
                 for i in range(len(self.particles.keys()), len(self.particles.keys()) + 50):
-                    self.addParticle(Particle(random.randint(0, screen_width), random.randint(0, screen_height-particle_size), particle_size, GetRandomColor(), i))
+                    self.addParticle(Particle(random.randint(0, screen_width), random.randint(0, screen_height-particle_size), particle_size, GetRandomColor(), i, random.randint(-10, 10)))
     
     def CheckForCollision(self, next_position, size, id, velocity):
         for particle in self.particles.values():
@@ -52,6 +52,18 @@ class Sim:
                     continue
                 # Check if particles are colliding
                 if distance <= size + particle.size:
+                    overlap = size + particle.size - distance
+
+                    # Calculate unit vector in the direction of collision
+                    collision_direction = (dx / distance, dy / distance)
+
+                    # Calculate the minimum movement to avoid collision (adjust position)
+                    move_distance = [overlap * collision_direction[0], overlap * collision_direction[1]]
+
+                    # Update the position of the current particle to avoid overlap
+                    # This moves the particle to the edge of the colliding particle
+                    next_position = (next_position[0] + move_distance[0], next_position[1] + move_distance[1])
+                    self.particles[id].position = next_position
                     # Normal and Tangent vectors
                     normal = [dx / distance, dy / distance]
                     tangent = [-normal[1], normal[0]]
@@ -91,12 +103,12 @@ class Sim:
         return self.particles[id]
 
 class Particle:
-    def __init__(self, x, y, size, color, id):
+    def __init__(self, x, y, size, color, id, xvel):
         self.id = id
         self.position = (x, y)
         self.size = size
         self.color = color
-        self.velocity = (0, 0)
+        self.velocity = (xvel, 0)
         self.vmax = 2*(screen_height/(time_to_cross_screen*frame_rate)) # maximum velocity in pixels per frame
         self.deltaV = self.vmax/(time_to_cross_screen*frame_rate) # change in velocity per frame
         self.colliding = False
@@ -139,6 +151,6 @@ class Particle:
 def GetRandomColor():
     return (random.randint(0,255), random.randint(0,255), random.randint(0,255))
 sim = Sim(screen_width, screen_height)
-for i in range(number_of_particles):
-    sim.addParticle(Particle(random.randint(0, screen_width), random.randint(0, screen_height-particle_size), particle_size, GetRandomColor(), i))
+sim.addParticle(Particle(0, 102, particle_size, GetRandomColor(), 0, 10))
+sim.addParticle(Particle(500, 100, particle_size, GetRandomColor(), 1, -10))
 sim.run()
