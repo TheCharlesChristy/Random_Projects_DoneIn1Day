@@ -62,7 +62,7 @@ class SpatialGrid {
     }
 };
 
-int Main() {
+int main() {
     vector<vector<int>> bounds = {{0, 0}, {100, 100}};
     vector<int> dimensions = {100, 100};
     int cell_size = 10;
