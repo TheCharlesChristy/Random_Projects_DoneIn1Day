@@ -121,7 +121,7 @@ class Simulation:
         
 
 sim = Simulation()
-gameseach = 100000
+gameseach = 1000
 n = gameseach*2
 sim.runSim(n)
 

@@ -1,156 +1,163 @@
 import pygame
 import math
 import random
+import HashSpatialGrid
 
 pygame.init()
 
 frame_rate = 60
-time_to_cross_screen = 1.5 #seconds
-screen_width = 400
-screen_height = 400
-bounce_coefficient = 0.3 #percentage of velocity retained after bouncing off of a wall
-friction_coefficient = 0.95 #percentage of velocity retained per frame due to friction
-minimum_velocity = 0.99 - 2*(screen_height/((frame_rate*time_to_cross_screen)**2)) #minimum velocity before stopping
+substeps = 16
+screen_height_Meters = 1
+time_to_cross_screen = 0.5 #seconds
+screen_width = 600
+screen_height = 600
+bounce_coefficient = 0.8 #percentage of velocity retained after bouncing off of a wall
 number_of_particles = 100
-particle_size = 5
-
-class Sim:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-        self.screen = pygame.display.set_mode((width, height))
-        self.screen.fill((255, 255, 255))
-        self.particles = {}
-
-    def addParticle(self, particle):
-        self.particles[particle.id] = particle
-
-    def update(self):
-        for particle in self.particles.values():
-            particle.update()
-            particle.draw(self.screen)
-
-    def run(self):
-        while True:
-            pygame.time.delay(int(1000/frame_rate))
-            self.screen.fill((255, 255, 255))
-            self.update()
-            pygame.display.flip()
-            if pygame.event.poll().type == pygame.QUIT:
-                break
-            if pygame.key.get_pressed()[pygame.K_SPACE]:
-                for i in range(len(self.particles.keys()), len(self.particles.keys()) + 50):
-                    self.addParticle(Particle(random.randint(0, screen_width), random.randint(0, screen_height-particle_size), particle_size, GetRandomColor(), i, random.randint(-10, 10)))
-    
-    def CheckForCollision(self, next_position, size, id, velocity):
-        for particle in self.particles.values():
-            if particle.id != id:
-                dx = next_position[0] - particle.position[0]
-                dy = next_position[1] - particle.position[1]
-                distance = math.sqrt(dx**2 + dy**2)
-                if distance == 0:
-                    continue
-                # Check if particles are colliding
-                if distance <= size + particle.size:
-                    overlap = size + particle.size - distance
-
-                    # Calculate unit vector in the direction of collision
-                    collision_direction = (dx / distance, dy / distance)
-
-                    # Calculate the minimum movement to avoid collision (adjust position)
-                    move_distance = [overlap * collision_direction[0], overlap * collision_direction[1]]
-
-                    # Update the position of the current particle to avoid overlap
-                    # This moves the particle to the edge of the colliding particle
-                    next_position = (next_position[0] + move_distance[0], next_position[1] + move_distance[1])
-                    self.particles[id].position = next_position
-                    # Normal and Tangent vectors
-                    normal = [dx / distance, dy / distance]
-                    tangent = [-normal[1], normal[0]]
-
-                    # Decompose velocities into normal and tangential components
-                    dot_product_normal1 = normal[0] * velocity[0] + normal[1] * velocity[1]
-                    dot_product_normal2 = normal[0] * particle.velocity[0] + normal[1] * particle.velocity[1]
-                    dot_product_tangent1 = tangent[0] * velocity[0] + tangent[1] * velocity[1]
-                    dot_product_tangent2 = tangent[0] * particle.velocity[0] + tangent[1] * particle.velocity[1]
-
-                    # New normal velocities (1D elastic collision equations)
-                    m1 = size  # Assuming size as mass
-                    m2 = particle.size  # Assuming particle.size as mass
-                    new_normal_velocity1 = (dot_product_normal1 * (m1 - m2) + 2 * m2 * dot_product_normal2) / (m1 + m2)
-                    new_normal_velocity2 = (dot_product_normal2 * (m2 - m1) + 2 * m1 * dot_product_normal1) / (m1 + m2)
-
-                    # Convert the scalar normal and tangential velocities into vectors
-                    new_normal_velocity1_vec = [new_normal_velocity1 * normal[0], new_normal_velocity1 * normal[1]]
-                    new_normal_velocity2_vec = [new_normal_velocity2 * normal[0], new_normal_velocity2 * normal[1]]
-                    tangential_velocity1_vec = [dot_product_tangent1 * tangent[0], dot_product_tangent1 * tangent[1]]
-                    tangential_velocity2_vec = [dot_product_tangent2 * tangent[0], dot_product_tangent2 * tangent[1]]
-
-                    # Combine the normal and tangential velocities to get the final velocity
-                    final_velocity1 = (new_normal_velocity1_vec[0] + tangential_velocity1_vec[0], new_normal_velocity1_vec[1] + tangential_velocity1_vec[1])
-                    final_velocity2 = (new_normal_velocity2_vec[0] + tangential_velocity2_vec[0], new_normal_velocity2_vec[1] + tangential_velocity2_vec[1])
-
-                    # Update velocities
-                    particle.SetCollisionVelocity(final_velocity2)
-
-                    # Return the new velocity of the current particle
-                    return final_velocity1
-
-        # If no collision, return the original velocity
-        return velocity
-    
-    def GetParticle(self, id):
-        return self.particles[id]
+particle_size = 7
+gravity = (2*screen_height_Meters*screen_height/((frame_rate*time_to_cross_screen)**2))*substeps # rate of change of velocity per frame
+maximum_velocity = (2*screen_height_Meters*screen_height/(frame_rate*time_to_cross_screen))*substeps # maximum velocity of a particle
 
 class Particle:
-    def __init__(self, x, y, size, color, id, xvel):
+    def __init__(self, id, position, particle_radius, color, gravity):
         self.id = id
-        self.position = (x, y)
-        self.size = size
+        self.position = position
+        self.previous_position = [position[0], position[1]]
+        self.radius = particle_radius
         self.color = color
-        self.velocity = (xvel, 0)
-        self.vmax = 2*(screen_height/(time_to_cross_screen*frame_rate)) # maximum velocity in pixels per frame
-        self.deltaV = self.vmax/(time_to_cross_screen*frame_rate) # change in velocity per frame
-        self.colliding = False
+        self.acceleration = [0, gravity]
 
-    def update(self):
-        if self.velocity[1] == 0 and self.position[1] == screen_height - self.size:
-            self.velocity = (self.velocity[0]*friction_coefficient, 0)
-            return
-        self.velocity = (self.velocity[0], min(self.velocity[1] + self.deltaV, self.vmax))
-        next_position = (self.position[0] + self.velocity[0], min(self.position[1] + self.velocity[1], screen_height - self.size))
-        if next_position[0] < 0:
-            next_position = (-next_position[0], next_position[1])
-            self.velocity = (-bounce_coefficient*self.velocity[0], self.velocity[1]*friction_coefficient)
-            if math.fabs(self.velocity[0]) < minimum_velocity:
-                self.velocity = (0, self.velocity[1])
-            
-        elif next_position[0]+self.size > screen_width:
-            next_position = (2*screen_width-(next_position[0]+2*self.size), next_position[1])
-            self.velocity = (-bounce_coefficient*self.velocity[0], self.velocity[1]*friction_coefficient)
-            if math.fabs(self.velocity[0]) < minimum_velocity:
-                self.velocity = (0, self.velocity[1])
+
+    def update(self, dt, grid):
+        nearby_particles = grid.FindNearby(self.position)
+        for particle in nearby_particles:
+            if particle.id == self.id:
+                continue
+            else:
+                distance = math.sqrt(((self.position[0]-particle.position[0])**2)+((self.position[1]-particle.position[1])**2))
+                if distance < particle.radius + self.radius:
+                    overlap = (particle.radius + self.radius) - distance
+                    
+                    dx = self.position[0] - self.previous_position[0]
+                    dy = self.position[1] - self.previous_position[1]
+
+                    direction_x = particle.position[0] - self.position[0]
+                    direction_y = particle.position[1] - self.position[1]
+                    direction_magnitude = math.sqrt(direction_x ** 2 + direction_y ** 2)
+                    if direction_magnitude == 0:
+                        pass
+                    else:
+                        direction_x /= direction_magnitude  # Normalize
+                        direction_y /= direction_magnitude  # Normalize
         
-        if next_position[1]+self.size >= screen_height:
-            next_position = (next_position[0], 2*screen_height-(next_position[1]+2*self.size))
-            self.velocity = (self.velocity[0]*friction_coefficient, -bounce_coefficient*self.velocity[1])
-            if math.fabs(self.velocity[1]) < minimum_velocity:
-                self.velocity = (self.velocity[0], 0)
-        
-        self.velocity = sim.CheckForCollision(next_position, self.size, self.id, self.velocity)
-            
-        next_position = (math.trunc(next_position[0]), math.trunc(next_position[1]))
-        self.position = next_position
+                        # Calculate how much to move; you might add a tiny extra to ensure they don't overlap
+                        move_distance = overlap
+                        # Update the position of one particle (or both, depending on your requirement)
+                        # For example, moving 'self' particle away from the 'particle'
+                        self.position[0] -= 0.5*((direction_x * move_distance))*dt
+                        self.position[1] -= 0.5*((direction_y * move_distance))*dt
+                        # And the 'particle' away from 'self'
+                        particle.position[0] += 0.5*((direction_x * move_distance))*dt
+                        particle.position[1] += 0.5*((direction_y * move_distance))*dt
+        self.Solve_Verlet(dt)
+        self.checkforwalls(grid)
 
-    def draw(self, screen):
-        pygame.draw.circle(screen, self.color, (self.position[0], self.position[1]), self.size)
-
-    def SetCollisionVelocity(self, velocity):
-        self.velocity = velocity
+    def Solve_Verlet(self, dt):
+        # Verlet integration
+        temp = self.position
+        xpos = 2*self.position[0] - self.previous_position[0] + self.acceleration[0]*(1/frame_rate)**2
+        ypos = 2*self.position[1] - self.previous_position[1] + self.acceleration[1]*(1/frame_rate)**2
+        self.position = [xpos, ypos]
+        self.previous_position = temp
     
-def GetRandomColor():
-    return (random.randint(0,255), random.randint(0,255), random.randint(0,255))
-sim = Sim(screen_width, screen_height)
-sim.addParticle(Particle(0, 102, particle_size, GetRandomColor(), 0, 10))
-sim.addParticle(Particle(500, 100, particle_size, GetRandomColor(), 1, -10))
+    def checkforwalls(self, grid):
+        #left wall
+        dx = self.position[0] - self.previous_position[0]
+        dy = self.position[1] - self.previous_position[1]
+        if self.position[0] < grid.bounds[0][0]+1:
+            self.previous_position[0] = self.position[0]-dx
+            self.position[0] = (grid.bounds[0][0]+1) - (bounce_coefficient*dx)
+        #right wall
+        elif self.position[0] > grid.bounds[1][0]-1:
+            self.previous_position[0] = self.position[0]-dx
+            self.position[0] = (grid.bounds[1][0]-1) - (bounce_coefficient*dx)
+        #top wall
+        elif self.position[1] < grid.bounds[0][1]+1:
+            self.previous_position[1] = self.position[1]-dy
+            self.position[1] = (grid.bounds[0][1]+1) - (bounce_coefficient*dy)
+        #bottom wall
+        elif self.position[1] > grid.bounds[1][1]-1:
+            self.previous_position[1] = self.position[1]-dy
+            self.position[1] = (grid.bounds[1][1]-1) - (bounce_coefficient*dy)
+        
+    def draw(self, screen):
+        pygame.draw.circle(screen, self.color, (int(self.position[0]), int(self.position[1])), self.radius)
+                    
+
+class Simulator:
+    def __init__(self, bounds, margin, particle_radius, substeps):
+        gridbounds = [[bounds[0][0]+margin, bounds[0][1]+margin], [bounds[1][0]-margin, bounds[1][1]-margin]]
+        dimensions = [gridbounds[1][0]-gridbounds[0][0], gridbounds[1][1]-gridbounds[0][1]]
+        self.grid = HashSpatialGrid.HashSpatialGrid(gridbounds, dimensions, 2*particle_radius)
+        self.grid.CheckVariables()
+        self.particles = []
+        self.substeps = 4
+        self.dt = 1/substeps
+        self.screen = pygame.display.set_mode((screen_width, screen_height))
+        self.clock = pygame.time.Clock()
+    
+    def update(self):
+        self.grid.update()
+        for particle in self.particles:
+            for i in range(self.substeps):
+                particle.update(self.dt, self.grid)
+    
+    def draw(self):
+        self.screen.fill((255, 255, 255))
+        pygame.draw.rect(self.screen, (0, 0, 0), (self.grid.bounds[0][0]-particle_size, self.grid.bounds[0][1]-particle_size, self.grid.dimensions[0]+2*particle_size, self.grid.dimensions[1]+2*particle_size), 1)
+        for particle in self.particles:
+            particle.draw(self.screen)
+
+    def add_particles(self, particles):
+        for particle in particles:
+            self.particles.append(particle)
+        self.grid.AddParticles(particles)
+
+    def run(self):
+        running = True
+        frames_to_run = -1
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        frames_to_run += 1
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    if event.key == pygame.K_p:
+                        create_particles()
+            if frames_to_run > 0 or frames_to_run == -1:
+                self.update()
+                if frames_to_run > 0:
+                    frames_to_run -= 1
+            self.draw()
+            fps_text = f"FPS: {int(self.clock.get_fps())}"
+            font = pygame.font.Font(None, 24)
+            text = font.render(fps_text, True, (0, 0, 0))
+            self.screen.blit(text, (10, 10))
+            pygame.display.flip()
+            self.clock.tick(frame_rate)
+        pygame.quit()
+
+sim = Simulator([[0, 0], [screen_width, screen_height]], 100, particle_size, substeps)
+
+def create_particles():
+    particles = []
+    for i in range(len(sim.particles), len(sim.particles)+number_of_particles):
+        color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        particles.append(Particle(i, [random.randint(sim.grid.bounds[0][0], sim.grid.bounds[1][0]-1), random.randint(sim.grid.bounds[0][1], sim.grid.bounds[1][1]-1)], particle_size, color, gravity))
+    sim.add_particles(particles)
+
+create_particles()
+
 sim.run()
